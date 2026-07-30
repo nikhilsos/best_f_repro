@@ -1,0 +1,289 @@
+"""
+Ben Hayes 2020
+
+ECS7006P Music Informatics
+
+Coursework 1: Beat Tracking
+
+File: beat_tracking_tcn/datasets/ballroom_dataset.py
+Description: A PyTorch dataset class representing the ballroom dataset.
+"""
+
+import torch
+from torch.utils.data import Dataset
+
+import os
+import numpy as np
+
+
+class BallroomDataset(Dataset):
+    """
+    A PyTorch Dataset wrapping the ballroom dataset for beat detection tasks
+
+    Provides mel spectrograms and a vector of beat annotations per spectrogram
+    frame as per the Davies & Böck paper (that is, with two frames of 0.5
+    either side of the beat's peak.
+
+    Requires dataset to be preprocessed to mel spectrograms using the provided
+    script.
+    """
+
+    def __init__(
+            self,
+            spectrogram_dir,
+            label_dir,
+            sr=22050,
+            hop_size_in_seconds=0.05,
+            trim_size=(80, 6000),  # Fix: was (80, 3000), must match BeatNet input (3000, 81)
+            downbeats=False):
+        """
+        Initialise the dataset object.
+
+        Parameters:
+            spectrogram_dir: directory holding spectrograms as NumPy dumps
+            label_dir: directory containing labels as NumPy dumps
+
+        Keyword Arguments:
+            sr (=22050): Sample rate to use when converting annotations to
+                         spectrogram frame indices
+            hop_size_in_seconds (=0.01): Mel spectrogram hop size
+            trim_size (=(80, 6000)): Dimensions to trim spectrogram down to.
+                                     Should match input dimensions of network.
+                                     Set to None to enable variable length input.
+            downbeats (=False): Whether to include downbeat annotations as a
+                                second output channel.
+        """
+        self.spectrogram_dir = spectrogram_dir
+        self.label_dir = label_dir
+        self.data_names = self._get_data_list()
+
+        self.sr = sr  # Fix: was hardcoded to 22050, ignoring the sr parameter
+        self.hop_size = int(np.floor(hop_size_in_seconds * sr))  # Fix: same, was hardcoded
+        self.trim_size = trim_size
+
+        self.downbeats = downbeats
+
+    def __len__(self):
+        """Overload len() calls on object."""
+        return len(self.data_names)
+
+    def __getitem__(self, i, trim_size=None):
+        """Overload square bracket indexing on object
+        
+        Parameters:
+            i: Index of the sample
+            trim_size: Optional tuple (freq_bins, time_frames) to trim to.
+                      If None, uses self.trim_size. Set time_frames to None
+                      for variable length input.
+        """
+        raw_spec, raw_beats = self._load_spectrogram_and_labels(i)
+        x, y = self._trim_spec_and_labels(raw_spec, raw_beats, trim_size)
+
+        # Transpose y for downbeats mode
+        if self.downbeats:
+            y = y.T  # (2, T)
+
+        return {
+            'spectrogram': torch.from_numpy(
+                    np.expand_dims(x.T, axis=0)).float(),
+            'target': torch.from_numpy(y.astype('float64')).float(),
+        }
+
+    def get_name(self, i):
+        """Fetches name of datapoint specified by index i"""
+        return self.data_names[i]
+
+    def get_ground_truth(self, i, quantised=True, downbeats=False):
+        """
+        Fetches ground truth annotations for datapoint specified by index i
+
+        Parameters:
+            i: Index signifying which datapoint to fetch truth for
+
+        Keyword Arguments:
+            quantised (=True): Whether to return a quantised ground truth
+            downbeats (=False): Whether to return downbeat times only
+        """
+
+        return self._get_quantised_ground_truth(i, downbeats)\
+            if quantised else self._get_unquantised_ground_truth(i, downbeats)
+
+    def get_original_length(self, i):
+        """
+        Returns the original (untrimmed) time length of the spectrogram at index i.
+        This is useful for collate functions when handling variable length sequences.
+
+        Parameters:
+            i: Index of the sample
+
+        Returns:
+            int: Number of time frames in the original spectrogram
+        """
+        data_name = self.data_names[i]
+        spectrogram = np.load(os.path.join(self.spectrogram_dir, data_name + '.npy'))
+        return spectrogram.shape[1]
+
+    def _trim_spec_and_labels(self, spec, labels, trim_size=None):
+        """
+        Trim spectrogram matrix and beat label vector to dimensions specified
+        in trim_size. Returns tuple of trimmed NumPy arrays.
+
+        If trim_size is None or not provided, returns the original spectrogram
+        and labels without trimming, enabling variable length input.
+
+        Both outputs are padded with zeros to the actual data size (or trim_size
+        if specified), ensuring consistent tensor shapes for batching.
+
+        Parameters:
+            spec: Spectrogram as NumPy array
+            labels: Labels as NumPy array
+            trim_size: Optional tuple (freq_bins, time_frames) to trim to.
+                      If None, uses self.trim_size. Set time_frames to None
+                      for variable length input.
+        """
+        # If no trim_size specified, use self.trim_size
+        if trim_size is None:
+            trim_size = self.trim_size
+        
+        spec_size = spec.shape[1]
+
+        # Determine actual trim dimensions
+        to_x = min(trim_size[0], spec.shape[0]) if trim_size[0] else spec.shape[0]
+        if trim_size[1] is not None:
+            to_y = min(trim_size[1], spec.shape[1])
+        else:
+            to_y = spec.shape[1]  # Keep full length for variable input
+
+        # Create output arrays with trimmed dimensions
+        x = np.zeros((to_x, to_y))
+        if not self.downbeats:
+            y = np.zeros(to_y)
+        else:
+            y = np.zeros((to_y, 2))
+
+        x[:to_x, :to_y] = spec[:to_x, :to_y]
+        y[:to_y] = labels[:to_y]
+
+        return x, y
+
+    def _get_data_list(self):
+        """Fetches list of datapoints in label directory"""
+
+        names = []
+        for entry in os.scandir(self.label_dir):
+            names.append(os.path.splitext(entry.name)[0])
+        return names
+
+    def _text_label_to_float(self, text):
+        """Extracts beat time and index from a text line and converts to floats"""
+        allowed = '1234567890. \t'
+        filtered = ''.join([c for c in text if c in allowed])
+        if '\t' in filtered:
+            t = filtered.rstrip('\n').split('\t')
+        else:
+            t = filtered.rstrip('\n').split(' ')
+        return float(t[0]), float(t[1])
+
+    def _get_quantised_ground_truth(self, i, downbeats):
+        """
+        Fetches the ground truth (time labels) from the appropriate
+        label file. Then, quantises it to the nearest spectrogram frames in
+        order to allow fair performance evaluation.
+        """
+
+        with open(
+                os.path.join(self.label_dir, self.data_names[i] + '.beats'),
+                'r') as f:
+
+            beat_times = []
+
+            for line in f:
+                time, index = self._text_label_to_float(line)
+                if not downbeats:
+                    beat_times.append(time * self.sr)
+                else:
+                    if index == 1:
+                        beat_times.append(time * self.sr)
+        quantised_times = []
+
+        for time in beat_times:
+            spec_frame = int(time / self.hop_size)
+            quantised_time = spec_frame * self.hop_size / self.sr
+            quantised_times.append(quantised_time)
+
+        return np.array(quantised_times)
+
+    def _get_unquantised_ground_truth(self, i, downbeats):
+        """
+        Fetches the ground truth (time labels) from the appropriate
+        label file.
+        """
+
+        with open(
+                os.path.join(self.label_dir, self.data_names[i] + '.beats'),
+                'r') as f:
+            
+            beat_times = []
+
+            for line in f:
+                time, index = self._text_label_to_float(line)
+                if not downbeats:
+                    beat_times.append(time)
+                else:
+                    if index == 1:
+                        beat_times.append(time)
+
+        return np.array(beat_times)
+
+    def _load_spectrogram_and_labels(self, i):
+        """
+        Given an index for the data name array, return the contents of the
+        corresponding spectrogram and label dumps.
+        """
+        data_name = self.data_names[i]
+
+        with open(
+                os.path.join(self.label_dir, data_name + '.beats'),
+                'r') as f:
+
+            beat_floats = []
+            beat_indices = []
+            for line in f:
+                parsed = self._text_label_to_float(line)
+                beat_floats.append(parsed[0])
+                beat_indices.append(parsed[1])
+            beat_times = np.array(beat_floats) * self.sr
+
+            if self.downbeats:
+                downbeat_times = self.sr * np.array(
+                    [t for t, idx in zip(beat_floats, beat_indices) if idx == 1])
+                    # Fix: renamed loop var from i to idx to avoid shadowing outer i
+
+
+        spectrogram =\
+            np.load(os.path.join(self.spectrogram_dir, data_name + '.npy'))
+        if not self.downbeats:
+            beat_vector = np.zeros(spectrogram.shape[-1])
+        else:
+            beat_vector = np.zeros((spectrogram.shape[-1], 2))
+
+        for time in beat_times:
+            spec_frame =\
+                min(int(time / self.hop_size), beat_vector.shape[0] - 1)
+            for n in range(-2, 3):
+                if 0 <= spec_frame + n < beat_vector.shape[0]:
+                    if not self.downbeats:
+                        beat_vector[spec_frame + n] = 1.0 if n == 0 else 0.5
+                    else:
+                        beat_vector[spec_frame + n, 0] = 1.0 if n == 0 else 0.5
+        
+        if self.downbeats:
+            for time in downbeat_times:
+                spec_frame =\
+                    min(int(time / self.hop_size), beat_vector.shape[0] - 1)
+                for n in range(-2, 3):
+                    if 0 <= spec_frame + n < beat_vector.shape[0]:
+                        beat_vector[spec_frame + n, 1] = 1.0 if n == 0 else 0.5
+
+
+        return spectrogram, beat_vector
