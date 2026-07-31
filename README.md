@@ -4,15 +4,32 @@ Everything here is a **copy**. Nothing was moved out of the main project.
 
 ## Environment
 
+With [uv](https://docs.astral.sh/uv/) — this is the path that was actually
+tested:
+
+```bash
+uv venv --python 3.10 .venv
+VIRTUAL_ENV=.venv uv pip install "numpy==1.26.4" "Cython==3.0.12"  # madmom builds against these
+VIRTUAL_ENV=.venv uv pip install -r requirements.txt
+```
+
+With stock venv + pip, if your Python has `ensurepip` (Debian/Ubuntu often
+does not — `python3 -m venv` fails there with *"ensurepip is not available"*,
+fixed by `apt install python3.10-venv`):
+
 ```bash
 python -m venv .venv && . .venv/bin/activate
-pip install "numpy==1.26.4" "Cython==3.0.12"   # madmom builds against these
+pip install "numpy==1.26.4" "Cython==3.0.12"
 pip install -r requirements.txt
 ```
 
 Python 3.10.12, torch 2.1.2, numpy 1.26.4 (must stay <2 — madmom's Cython
 extensions are built against the 1.x ABI), madmom from git at commit
 `27f032e`. See `requirements.txt` for the full pinned set.
+
+Verified 2026-07-31: installed into an empty venv with uv 0.10.9, madmom built
+from the pinned commit with no manual steps, then `run_best.sh` reproduced all
+seven F-measures bit-identically and `infer.py` gave the same 38 downbeats.
 
 ## Run
 
