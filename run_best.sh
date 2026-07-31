@@ -31,6 +31,7 @@ runs=(
 
 [ -n "${DRY_RUN:-}" ] || : > "$OUT"
 
+
 for entry in "${runs[@]}"; do
     IFS=: read -r rp spec ann min_bpm max_bpm ckpt <<< "$entry"
     cmd="python $SCRIPT $spec $ann $HERE/checkpoints/$ckpt \

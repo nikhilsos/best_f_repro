@@ -54,6 +54,54 @@ Settings for every run: `transition_lambda=100`, Viterbi decode
 (`process_offline`), `hop=0.1`, `f_measure_threshold=1.5`, per-pattern BPM range
 from `bpmselect()`.
 
+## Try it on the bundled samples
+
+Two 60-second excerpts with their ground-truth downbeats are in `samples/`:
+a slow pattern (jungmori, ~8.7 s cycle) and a fast one (jajinmori, ~2.25 s).
+
+```console
+$ python infer.py samples/jungmori_1_60s.mp3 --rp jungmori
+0.100000
+8.900000
+17.800000
+26.400000
+34.800000
+43.500000
+52.200000
+
+$ python infer.py samples/jajinmori_za_2_60s.mp3 --rp jajinmori --out out.beats
+23 downbeats -> out.beats
+```
+
+Scored against the bundled `.beats` references:
+
+| sample | predicted | reference | F@1.5 | F@0.5 | F@0.07 |
+|---|---|---|---|---|---|
+| jungmori_1_60s | 7 | 7 | 1.000 | 1.000 | 0.667 |
+| jajinmori_za_2_60s | 23 | 20 | 0.865 | 0.865 | 0.649 |
+
+The jungmori excerpt is exact at cycle level; jajinmori over-predicts by three
+cycles at its faster rate. The F@0.07 column is the honest tight-tolerance
+number — predictions land within roughly 0.05–0.2 s of the references.
+
+Reproduce the table:
+
+```bash
+python infer.py samples/jungmori_1_60s.mp3 --rp jungmori --out /tmp/pred.beats
+python - <<'EOF'
+import numpy as np
+from mir_eval.beat import evaluate
+p = np.loadtxt('/tmp/pred.beats', usecols=0)
+r = np.loadtxt('samples/jungmori_1_60s.beats', usecols=0)
+print({t: round(evaluate(r, p[:len(r)], f_measure_threshold=t)['F-measure'], 3)
+       for t in (1.5, 0.5, 0.07)})
+EOF
+```
+
+Excerpts are cut from the head of the source recordings with `ffmpeg -t 60
+-acodec copy`, so the reference timestamps are unchanged; the `.beats` files
+are the originals filtered to `t < 60`.
+
 ## Inference on a new audio track
 
 ```bash
