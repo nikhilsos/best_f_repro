@@ -2,6 +2,18 @@
 
 Everything here is a **copy**. Nothing was moved out of the main project.
 
+## Environment
+
+```bash
+python -m venv .venv && . .venv/bin/activate
+pip install "numpy==1.26.4" "Cython==3.0.12"   # madmom builds against these
+pip install -r requirements.txt
+```
+
+Python 3.10.12, torch 2.1.2, numpy 1.26.4 (must stay <2 — madmom's Cython
+extensions are built against the 1.x ABI), madmom from git at commit
+`27f032e`. See `requirements.txt` for the full pinned set.
+
 ## Run
 
 ```bash
@@ -24,6 +36,39 @@ Verified 2026-07-30 — all seven values below reproduce exactly.
 Settings for every run: `transition_lambda=100`, Viterbi decode
 (`process_offline`), `hop=0.1`, `f_measure_threshold=1.5`, per-pattern BPM range
 from `bpmselect()`.
+
+## Inference on a new audio track
+
+```bash
+python infer.py track.mp3 --rp jungmori                 # downbeat times to stdout
+python infer.py track.mp3 --rp jungmori --out track.beats
+python infer.py track.wav --min-bpm 5 --max-bpm 15      # unknown rhythm pattern
+```
+
+`--rp` picks both the cycle-rate range and the checkpoint (`offline_tcn`, or
+`offline_tcn_vocals_only` for jinyangjo). Output is one timestamp per line, or
+`<time>\t1` lines in `.beats` format with `--out`.
+
+**The output is the downbeat track.** The `.beats` annotations mark only jangdan
+cycle starts, so the model has one output channel and predicts cycle starts
+directly — there is no separate beat level. This is also why the BPM ranges are
+5–60: they are *cycles* per minute, not beats. Median cycle rate measured from
+the test annotations, each inside its `bpmselect()` range:
+
+| pattern | median cycle | cycles/min | range used |
+|---|---|---|---|
+| hweemori | 1.31 s | 45.8 | 40–60 |
+| jajinmori | 2.25 s | 26.6 | 20–30 |
+| utmori | 2.63 s | 22.8 | 20–30 |
+| utzungmori | 3.67 s | 16.3 | 10–20 |
+| jungjungmori | 4.46 s | 13.5 | 5–30 |
+| jungmori | 8.67 s | 6.9 | 5–15 |
+| jinyangjo | 9.81 s | 6.1 | 5–15 |
+
+Sanity check on `zungmori_mp3/1.mp3` (jungmori) against its annotation:
+38 predicted vs 37 reference downbeats, F@1.5 = 1.000, F@0.5 = 1.000,
+F@0.07 = 0.528. Spectrograms are computed inside `infer.py` at 2048 FFT /
+0.1 s hop / 81 mels, matching the dirs used for the evaluation table.
 
 ## Contents
 

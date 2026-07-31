@@ -1,0 +1,26 @@
+# Versions this bundle was verified with, on Python 3.10.12.
+#
+#   python -m venv .venv && . .venv/bin/activate
+#   pip install -r requirements.txt
+#
+# madmom is not installed from PyPI: the released 0.16.1 does not build against
+# recent numpy/Python, so this uses the git master (reports itself as 0.17.dev0).
+# It needs numpy and Cython present *before* its own build step, hence the order
+# below and the two-step install if your pip resolver complains:
+#
+#   pip install "numpy==1.26.4" "Cython==3.0.12"
+#   pip install -r requirements.txt
+#
+# numpy must stay <2: madmom's Cython extensions are built against the 1.x ABI.
+
+numpy==1.26.4
+Cython==3.0.12
+scipy==1.15.2
+torch==2.1.2
+librosa==0.11.0
+soundfile==0.13.1
+audioread==3.0.1
+mir_eval==0.8.2
+matplotlib==3.10.1
+# Pinned to the exact commit this bundle was verified against, not a branch.
+madmom @ git+https://github.com/CPJKU/madmom.git@27f032e8947204902c675e5e341a3faf5dc86dae
